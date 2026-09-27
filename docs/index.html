@@ -1813,6 +1813,15 @@
                                 <input type="number" id="maxLevelFilter" min="0" max="50" placeholder="50">
                             </div>
 
+                            <div class="filter-group">
+                                <label for="handedFilter">Grepp</label>
+                                <select id="handedFilter">
+                                    <option value="">Alla vapen</option>
+                                    <option value="one">Enhandsvapen</option>
+                                    <option value="two">Tvåhandsvapen</option>
+                                </select>
+                            </div>
+
                             <div class="filter-group checkbox-group">
                                 <label>
                                     <input type="checkbox" id="craftableFilter">
@@ -2304,6 +2313,7 @@
             const minLevel = parseInt(document.getElementById('minLevelFilter').value) || 0;
             const maxLevel = parseInt(document.getElementById('maxLevelFilter').value) || 999;
             const craftableOnly = document.getElementById('craftableFilter').checked;
+            const handedFilter = document.getElementById('handedFilter').value;
             const activeStatFilters = statFilters.filter(f => f.label);
 
             filteredItems = allItems.filter(item => {
@@ -2349,6 +2359,13 @@
                 // Craftable
                 if (craftableOnly && !isCraftable(item)) {
                     return false;
+                }
+
+                // Grepp (one/two-handed) - only weapons carry is_two_handed
+                if (handedFilter) {
+                    if (item.type !== 'weapon') return false;
+                    if (handedFilter === 'one' && item.is_two_handed) return false;
+                    if (handedFilter === 'two' && !item.is_two_handed) return false;
                 }
 
                 // Stat filters - every active row must match (AND), and a row matches if
@@ -2436,6 +2453,7 @@
             const minLevel = document.getElementById('minLevelFilter').value;
             const maxLevel = document.getElementById('maxLevelFilter').value;
             const craftable = document.getElementById('craftableFilter').checked;
+            const handed = document.getElementById('handedFilter').value;
             const sort = document.getElementById('sortFilter').value;
 
             if (search) params.set('q', search);
@@ -2445,6 +2463,7 @@
             if (minLevel) params.set('min', minLevel);
             if (maxLevel) params.set('max', maxLevel);
             if (craftable) params.set('craftable', '1');
+            if (handed) params.set('handed', handed);
             if (sort && sort !== 'name') params.set('sort', sort);
             statFilters.filter(f => f.label).forEach(f => params.append('stat', `${f.label}|${f.min}|${f.max}`));
             if (currentDisplayMode !== 'grid') params.set('view', currentDisplayMode);
@@ -2475,6 +2494,7 @@
             document.getElementById('minLevelFilter').value = params.get('min') || '';
             document.getElementById('maxLevelFilter').value = params.get('max') || '';
             document.getElementById('craftableFilter').checked = params.get('craftable') === '1';
+            document.getElementById('handedFilter').value = params.get('handed') || '';
             document.getElementById('sortFilter').value = params.get('sort') || 'name';
 
             statFilters = params.getAll('stat').map(s => {
@@ -3251,6 +3271,7 @@
             document.getElementById('minLevelFilter').value = '';
             document.getElementById('maxLevelFilter').value = '';
             document.getElementById('craftableFilter').checked = false;
+            document.getElementById('handedFilter').value = '';
             document.getElementById('sortFilter').value = 'name';
             statFilters = [];
             renderStatFilterRows();
@@ -4068,6 +4089,7 @@
         document.getElementById('minLevelFilter').addEventListener('change', applyFilters);
         document.getElementById('maxLevelFilter').addEventListener('change', applyFilters);
         document.getElementById('craftableFilter').addEventListener('change', applyFilters);
+        document.getElementById('handedFilter').addEventListener('change', applyFilters);
         document.getElementById('sortFilter').addEventListener('change', applyFilters);
     </script>
 </body>
