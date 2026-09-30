@@ -204,12 +204,13 @@
         { "name": "Livsdränering", "text": "10% chans vid attack att stjäla 5% av motståndarens aktuella HP, max 2 gånger per runda." }
       ],
       "ageStages": [
-        { "name": "Odöd", "days": 0, "statMods": {}, "weaponModAll": 0 },
+        { "name": "Ung", "days": 0, "statMods": {}, "weaponModAll": 0 },
+        { "name": "Vuxen", "days": 100, "statMods": {}, "weaponModAll": 0 },
         { "name": "Medelålders", "days": 101, "statMods": { "bashalsa": -5, "styrka": -5, "uthallighet": -5, "initiativ": -10, "undvika": -10, "ledarskap": 10 }, "weaponModAll": 0 },
         { "name": "Gammal", "days": 102, "statMods": { "bashalsa": -15, "styrka": -15, "uthallighet": -15, "initiativ": -25, "undvika": -25, "ledarskap": 15 }, "weaponModAll": 0 },
         { "name": "Uråldrig", "days": 103, "statMods": { "bashalsa": -30, "styrka": -30, "uthallighet": -30, "initiativ": -30, "undvika": -30, "ledarskap": 20, "provokation": -30 }, "weaponModAll": 0 }
       ],
-      "agingNote": "Odöda åldras mycket långsamt - först från dag 101 kommer Medelålders, följt av Gammal (dag 102) och Uråldrig (dag 103), utan straff på vapenfärdigheter."
+      "agingNote": "Odöda åldras mycket långsamt - Ung till dag 100 och Vuxen (utan bonusar) dag 100, sedan Medelålders från dag 101, följt av Gammal (dag 102) och Uråldrig (dag 103), utan straff på vapenfärdigheter."
     }
   ]
 }
