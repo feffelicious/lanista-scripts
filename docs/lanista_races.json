@@ -123,7 +123,7 @@
       "critMin": 1,
       "critMax": 2,
       "offhandDamagePct": 110,
-      "statMods": { "bashalsa": 20, "styrka": 30, "uthallighet": 0, "initiativ": 0, "undvika": -30, "tur": 5, "larande": -10, "disciplin": 15 },
+      "statMods": { "bashalsa": 20, "styrka": 30, "uthallighet": 0, "initiativ": 0, "undvika": -30, "tur": 5, "larande": -10, "disciplin": 15, "ledarskap": -10 },
       "weaponMods": { "axe": 10, "sword": 0, "mace": 10, "stave": -5, "spear": 0, "chain": 10, "shield": -5 },
       "abilities": [
         { "name": "Ökad kritisk skada", "text": "+7% kritisk skada vid kritisk träff." },
