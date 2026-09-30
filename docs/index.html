@@ -3545,7 +3545,9 @@
             (raceData ? Object.keys(raceData.statLabels) : []).forEach(key => {
                 const base = state.baseStats[key] || 0;
                 const racePct = race ? (race.statMods[key] || 0) : 0;
-                const agePct = ageStage ? (ageStage.statMods[key] || 0) : 0;
+                // The game's own "utplacerade värden" (what the userscript imports) already
+                // include the age modifier, so it's only applied here for hand-entered points.
+                const agePct = ageStage && !state.ageInBase ? (ageStage.statMods[key] || 0) : 0;
                 let levelPct = 0;
                 if (race && race.levelBonus && race.levelBonus.perLevel[key] && state.level > race.levelBonus.aboveLevel) {
                     levelPct = (state.level - race.levelBonus.aboveLevel) * race.levelBonus.perLevel[key];
@@ -3569,7 +3571,7 @@
             WEAPON_SKILL_KEYS.forEach(key => {
                 const base = state.weaponSkills[key] || 0;
                 const racePct = race ? (race.weaponMods[key] || 0) : 0;
-                const agePct = ageStage ? (ageStage.weaponModAll || 0) : 0;
+                const agePct = ageStage && !state.ageInBase ? (ageStage.weaponModAll || 0) : 0;
                 const afterMod = base * (1 + (racePct + agePct) / 100);
                 const equipFlat = equip.weaponTotals[key] || 0;
                 weaponSkills[key] = { base, racePct, agePct, equipFlat, total: afterMod + equipFlat };
@@ -3660,6 +3662,11 @@
             renderBuildView();
         }
 
+        function setAgeInBase(checked) {
+            buildState.ageInBase = !!checked;
+            renderBuildView();
+        }
+
         function setBaseStat(key, value) {
             buildState.baseStats[key] = Math.max(0, parseInt(value, 10) || 0);
             renderBuildView();
@@ -3699,6 +3706,8 @@
             if (data.level) buildState.level = Math.max(1, Math.min(50, parseInt(data.level, 10) || 1));
             if (data.baseStats) Object.assign(buildState.baseStats, data.baseStats);
             if (data.weaponSkills) Object.assign(buildState.weaponSkills, data.weaponSkills);
+            // The userscript sends the game's "utplacerade värden", which have age baked in.
+            buildState.ageInBase = true;
 
             const race = buildState.race ? racesById[buildState.race] : null;
             if (race) {
@@ -4037,6 +4046,7 @@
                         <div class="build-panel">
                             <h3>Grundegenskaper</h3>
                             <p class="info-note">Fyll i poängen du faktiskt spenderat på din karaktär - spelet exponerar ingen formel för nivå → poäng, så det här replikerar din riktiga karaktär i stället för att räkna ut den.</p>
+                            <label class="info-note" style="display:flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" ${buildState.ageInBase ? 'checked' : ''} onchange="setAgeInBase(this.checked)"> Värdena inkluderar redan ålder (spelets "utplacerade värden")</label>
                             <div class="build-stats-grid">
                                 ${Object.keys(raceData.statLabels).map(key => `
                                     <div class="build-stat-input">
