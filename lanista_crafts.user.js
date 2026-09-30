@@ -1901,33 +1901,18 @@
 
 	// A one-handed weapon wielded in the "Sköldhand" (dual wielding) has the same weapon
 	// type_name as the main-hand weapon, so type alone would send both to the simulator's
-	// 'weapon' slot and the off-hand one would be lost. Battle payloads identify the hands
-	// by main_hand_id/off_hand_id; those are preferred when the avatar carries them too,
-	// otherwise the second equipped weapon is taken as the off-hand one.
-	function buildSimFindOffhandWeapon(avatar, equippedItems) {
-		const weapons = equippedItems.filter((item) => BUILD_SIM_WEAPON_TYPE_NAMES.has(item.type_name));
-		if (weapons.length < 2) return null;
-		const offhandId = avatar.off_hand_id;
-		const mainId = avatar.main_hand_id;
-		if (offhandId != null) {
-			const match = weapons.find((item) => item.id === offhandId);
-			if (match) return match;
-		}
-		if (mainId != null) {
-			const other = weapons.find((item) => item.id !== mainId);
-			if (other && weapons.some((item) => item.id === mainId)) return other;
-		}
-		const flagged = weapons.find((item) => item.is_offhand || item.off_hand || item.offhand);
-		return flagged || weapons[1];
+	// 'weapon' slot and the off-hand one would be lost. Confirmed live (2026-09-30):
+	// /api/avatars/me flags each equipped item with main_hand/off_hand booleans, and item
+	// order is not reliable (the off-hand weapon can come first).
+	function buildSimFindOffhandWeapon(equippedItems) {
+		return equippedItems.find((item) => item.off_hand && BUILD_SIM_WEAPON_TYPE_NAMES.has(item.type_name)) || null;
 	}
 
-	// The stats page's "Statiskt" column (a flat amount on top of everything, Tot. = Nu +
-	// Statiskt). Not yet confirmed which field /api/avatars/me uses for it, so any numeric
-	// field on the stat/skill entry whose name mentions "static" is taken - e.g. static_value,
-	// static_bonus, value_static. Returns null when there is no such field.
+	// The stats page's "Statiskt" column - a flat amount on top of everything (Tot. = Nu +
+	// Statiskt). Confirmed live: each /api/avatars/me stat/weapon-skill entry carries it as
+	// static_value, next to `value` (the spent points incl. age, which is what's imported).
 	function buildSimStaticValue(entry) {
-		const key = Object.keys(entry || {}).find((k) => /static/i.test(k) && typeof entry[k] === 'number');
-		return key ? entry[key] : null;
+		return typeof entry.static_value === 'number' ? entry.static_value : null;
 	}
 
 	function buildSimImportPayload(avatar) {
@@ -1951,12 +1936,9 @@
 			if (staticValue) staticWeaponSkills[key] = staticValue;
 		});
 
-		if (!Object.keys(staticStats).length && !Object.keys(staticWeaponSkills).length) {
-			console.info('[Lanista] Bygg-simulatorn: hittade inga statiska värden. Stat-fält:', (avatar.stats || [])[0]);
-		}
 
 		const equippedItems = (avatar.items || []).filter((item) => item.equipped);
-		const offhandItem = buildSimFindOffhandWeapon(avatar, equippedItems);
+		const offhandItem = buildSimFindOffhandWeapon(equippedItems);
 		const equipped = equippedItems
 			.map((item) => item === offhandItem ? { slot: 'shield', name: item.name, enchants: buildSimEnchantNames(item) } : buildSimEquippedEntry(item))
 			.filter(Boolean);
