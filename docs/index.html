@@ -3357,7 +3357,9 @@
             baseStats: {},
             weaponSkills: {},
             equipped: {},
-            enchants: {}
+            enchants: {},
+            staticStats: {},
+            staticWeaponSkills: {}
         };
 
         let activeSlotPicker = null;
@@ -3385,7 +3387,7 @@
         function setCompareTarget(name) {
             const saved = getSavedBuilds();
             if (!saved[name]) return;
-            compareBuild = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {} }, JSON.parse(JSON.stringify(saved[name])));
+            compareBuild = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {}, staticStats: {}, staticWeaponSkills: {} }, JSON.parse(JSON.stringify(saved[name])));
             compareLabel = name;
             renderBuildView();
         }
@@ -3605,7 +3607,10 @@
                 const enchantPct = equip.statPct[key] || 0;
                 const afterMod = base * (1 + (racePct + agePct + levelPct + enchantPct) / 100);
                 const equipFlat = equip.statTotals[key] || 0;
-                stats[key] = { base, racePct, agePct, levelPct, equipFlat, total: afterMod + equipFlat, capped: false };
+                // "Statiskt" in the game's own stat table: a flat amount added on top of
+                // everything else (Tot. = Nu + Statiskt), untouched by race/age modifiers.
+                const staticFlat = (state.staticStats || {})[key] || 0;
+                stats[key] = { base, racePct, agePct, levelPct, equipFlat, staticFlat, total: afterMod + equipFlat + staticFlat, capped: false };
             });
 
             // Bashälsa (HP) can never exceed 5.5x effective Styrka - the one exact formula
@@ -3625,7 +3630,8 @@
                 const agePct = ageStage && !state.ageInBase ? (ageStage.weaponModAll || 0) : 0;
                 const afterMod = base * (1 + (racePct + agePct + (equip.weaponPct[key] || 0)) / 100);
                 const equipFlat = equip.weaponTotals[key] || 0;
-                weaponSkills[key] = { base, racePct, agePct, equipFlat, total: afterMod + equipFlat };
+                const staticFlat = (state.staticWeaponSkills || {})[key] || 0;
+                weaponSkills[key] = { base, racePct, agePct, equipFlat, staticFlat, total: afterMod + equipFlat + staticFlat };
             });
 
             const totalWeight = (race ? race.baseWeight : 0) + equip.weight;
@@ -3720,6 +3726,12 @@
 
         function setBaseStat(key, value) {
             buildState.baseStats[key] = Math.max(0, parseInt(value, 10) || 0);
+            renderBuildView();
+        }
+
+        function setStaticValue(group, key, value) {
+            buildState[group] = buildState[group] || {};
+            buildState[group][key] = parseFloat(value) || 0;
             renderBuildView();
         }
 
@@ -3831,11 +3843,13 @@
         // would risk equipping the wrong thing entirely. Matching by name against the item(s)
         // valid for the target slot is slower but unambiguous in practice.
         function applyBuildImport(data) {
-            buildState = { race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {} };
+            buildState = { race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {}, staticStats: {}, staticWeaponSkills: {} };
             if (data.race && racesById[data.race]) buildState.race = data.race;
             if (data.level) buildState.level = Math.max(1, Math.min(50, parseInt(data.level, 10) || 1));
             if (data.baseStats) Object.assign(buildState.baseStats, data.baseStats);
             if (data.weaponSkills) Object.assign(buildState.weaponSkills, data.weaponSkills);
+            if (data.staticStats) Object.assign(buildState.staticStats, data.staticStats);
+            if (data.staticWeaponSkills) Object.assign(buildState.staticWeaponSkills, data.staticWeaponSkills);
             // The userscript sends the game's "utplacerade värden", which have age baked in.
             buildState.ageInBase = true;
 
@@ -4020,6 +4034,7 @@
                         <td>${s.racePct >= 0 ? '+' : ''}${s.racePct}%</td>
                         <td>${s.agePct >= 0 ? '+' : ''}${s.agePct}%${s.levelPct ? ` (+${s.levelPct} niv.)` : ''}</td>
                         <td>${s.equipFlat >= 0 ? '+' : ''}${Math.round(s.equipFlat * 10) / 10}</td>
+                        <td>${s.staticFlat >= 0 ? '+' : ''}${Math.round(s.staticFlat * 10) / 10}</td>
                         <td class="total ${s.capped ? 'capped' : ''}">${Math.round(s.total * 10) / 10}${s.capped ? ' (max)' : ''}</td>
                         ${deltaTd}
                     </tr>
@@ -4036,6 +4051,7 @@
                         <td>${s.racePct >= 0 ? '+' : ''}${s.racePct}%</td>
                         <td>${s.agePct >= 0 ? '+' : ''}${s.agePct}%</td>
                         <td>${s.equipFlat >= 0 ? '+' : ''}${Math.round(s.equipFlat * 10) / 10}</td>
+                        <td>${s.staticFlat >= 0 ? '+' : ''}${Math.round(s.staticFlat * 10) / 10}</td>
                         <td class="total">${Math.round(s.total * 10) / 10}</td>
                         ${deltaTd}
                     </tr>
@@ -4047,14 +4063,14 @@
                     <div class="stat-table-block">
                         <h4 class="stat-table-heading">Grundegenskaper</h4>
                         <table class="${tableClass}">
-                            <thead><tr><th>Egenskap</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Totalt</th>${deltaTh}</tr></thead>
+                            <thead><tr><th>Egenskap</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Statiskt</th><th>Totalt</th>${deltaTh}</tr></thead>
                             <tbody>${statRows}</tbody>
                         </table>
                     </div>
                     <div class="stat-table-block">
                         <h4 class="stat-table-heading">Vapenfärdigheter</h4>
                         <table class="${tableClass}">
-                            <thead><tr><th>Färdighet</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Totalt</th>${deltaTh}</tr></thead>
+                            <thead><tr><th>Färdighet</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Statiskt</th><th>Totalt</th>${deltaTh}</tr></thead>
                             <tbody>${weaponRows}</tbody>
                         </table>
                     </div>
@@ -4092,7 +4108,7 @@
         function loadSavedBuild(name) {
             const saved = getSavedBuilds();
             if (!saved[name]) return;
-            buildState = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {} }, JSON.parse(JSON.stringify(saved[name])));
+            buildState = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {}, staticStats: {}, staticWeaponSkills: {} }, JSON.parse(JSON.stringify(saved[name])));
             renderBuildView();
         }
 
@@ -4219,6 +4235,24 @@
                                     </div>
                                 `).join('')}
                             </div>
+                            <details style="margin-top: 20px;">
+                                <summary style="cursor:pointer;">Statiska värden</summary>
+                                <p class="info-note">Spelets kolumn "Statiskt" - läggs till ovanpå allt annat och påverkas inte av ras eller ålder.</p>
+                                <div class="build-stats-grid">
+                                    ${Object.keys(raceData.statLabels).map(key => `
+                                        <div class="build-stat-input">
+                                            <label>${raceData.statLabels[key]}</label>
+                                            <input type="number" step="any" value="${(buildState.staticStats || {})[key] || 0}" onchange="setStaticValue('staticStats', '${key}', this.value)">
+                                        </div>
+                                    `).join('')}
+                                    ${WEAPON_SKILL_KEYS.map(key => `
+                                        <div class="build-stat-input">
+                                            <label>${raceData.weaponSkillLabels[key]}</label>
+                                            <input type="number" step="any" value="${(buildState.staticWeaponSkills || {})[key] || 0}" onchange="setStaticValue('staticWeaponSkills', '${key}', this.value)">
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </details>
                         </div>
                     </div>
 
