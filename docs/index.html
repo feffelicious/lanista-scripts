@@ -1214,6 +1214,14 @@
             color: #b5482f;
         }
 
+        .build-slot-enchant {
+            font-size: 0.8em;
+        }
+
+        .build-slot-enchant .info-note {
+            font-size: 0.9em;
+        }
+
         /* Base stats and weapon skills sit side by side once there's room, instead of one
            table stretched full-width with its number columns spread thin across it. */
         .stat-tables {
@@ -3348,7 +3356,8 @@
             lifeStage: 'Ung',
             baseStats: {},
             weaponSkills: {},
-            equipped: {}
+            equipped: {},
+            enchants: {}
         };
 
         let activeSlotPicker = null;
@@ -3376,7 +3385,7 @@
         function setCompareTarget(name) {
             const saved = getSavedBuilds();
             if (!saved[name]) return;
-            compareBuild = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {} }, JSON.parse(JSON.stringify(saved[name])));
+            compareBuild = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {} }, JSON.parse(JSON.stringify(saved[name])));
             compareLabel = name;
             renderBuildView();
         }
@@ -3401,7 +3410,9 @@
         function describeSlotItem(state, slot) {
             const key = state.equipped[slot];
             const item = key ? itemsByKey[key] : null;
-            return item ? item.name : null;
+            if (!item) return null;
+            const enchants = getSlotEnchants(state, slot).map(e => e.name);
+            return enchants.length ? `${item.name} (${enchants.join(', ')})` : item.name;
         }
 
         function renderComparisonChanges() {
@@ -3457,6 +3468,8 @@
         function collectEquipmentBonuses(state = buildState) {
             const statTotals = {};
             const weaponTotals = {};
+            const statPct = {};
+            const weaponPct = {};
             let weight = 0;
             const combat = {
                 damageMin: 0, damageMax: 0, block: 0, critRate: 0, maxCritRate: 0, hitRate: 0,
@@ -3533,7 +3546,44 @@
                 }
             });
 
-            return { statTotals, weaponTotals, weight, combat };
+            // Enchants socketed into weapons/shields (see getSlotEnchants). Only their
+            // always-on effects count: modifiers with proc_type_name 'applicering' and the
+            // enchant's own crit/hit/damage/weight fields. Modifiers that only trigger on an
+            // attack, block, dodge etc. are listed as notes on the slot instead.
+            Object.keys(state.equipped).forEach(slot => {
+                if (slot === 'shield' && isShieldBlocked(state)) return;
+                getSlotEnchants(state, slot).forEach(enchant => {
+                    weight += enchant.weight || 0;
+                    combat.critRate += enchant.crit_rate || 0;
+                    combat.maxCritRate += enchant.max_crit_rate || 0;
+                    combat.hitRate += enchant.increased_hit_rate || 0;
+                    if (slot === 'shield') {
+                        combat.offhandDamageMin += enchant.min_damage || 0;
+                        combat.offhandDamageMax += enchant.max_damage || 0;
+                    } else if (slot === 'weapon') {
+                        combat.damageMin += enchant.min_damage || 0;
+                        combat.damageMax += enchant.max_damage || 0;
+                    }
+                    (enchant.enchant_modifiers || []).forEach(mod => {
+                        if (mod.debuff || mod.proc_type_name !== 'applicering') return;
+                        const name = (mod.enchantable_name || '').toLowerCase().trim();
+                        const display = String(mod.enchant_value_display);
+                        const value = parseFloat(display) || 0;
+                        const isPct = display.endsWith('%');
+                        if (name.startsWith('vapenfärdigheten ')) {
+                            const key = weaponMap[name.replace('vapenfärdigheten ', '').trim()];
+                            const bucket = isPct ? weaponPct : weaponTotals;
+                            if (key) bucket[key] = (bucket[key] || 0) + value;
+                            return;
+                        }
+                        const key = statMap[name];
+                        const bucket = isPct ? statPct : statTotals;
+                        if (key) bucket[key] = (bucket[key] || 0) + value;
+                    });
+                });
+            });
+
+            return { statTotals, weaponTotals, statPct, weaponPct, weight, combat };
         }
 
         function computeEffectiveStats(state = buildState) {
@@ -3552,7 +3602,8 @@
                 if (race && race.levelBonus && race.levelBonus.perLevel[key] && state.level > race.levelBonus.aboveLevel) {
                     levelPct = (state.level - race.levelBonus.aboveLevel) * race.levelBonus.perLevel[key];
                 }
-                const afterMod = base * (1 + (racePct + agePct + levelPct) / 100);
+                const enchantPct = equip.statPct[key] || 0;
+                const afterMod = base * (1 + (racePct + agePct + levelPct + enchantPct) / 100);
                 const equipFlat = equip.statTotals[key] || 0;
                 stats[key] = { base, racePct, agePct, levelPct, equipFlat, total: afterMod + equipFlat, capped: false };
             });
@@ -3572,7 +3623,7 @@
                 const base = state.weaponSkills[key] || 0;
                 const racePct = race ? (race.weaponMods[key] || 0) : 0;
                 const agePct = ageStage && !state.ageInBase ? (ageStage.weaponModAll || 0) : 0;
-                const afterMod = base * (1 + (racePct + agePct) / 100);
+                const afterMod = base * (1 + (racePct + agePct + (equip.weaponPct[key] || 0)) / 100);
                 const equipFlat = equip.weaponTotals[key] || 0;
                 weaponSkills[key] = { base, racePct, agePct, equipFlat, total: afterMod + equipFlat };
             });
@@ -3677,9 +3728,47 @@
             renderBuildView();
         }
 
+        // Weapons and shields carry max_enchants (1, or 2 for most two-handers) and a list
+        // of enchant_tags (Rubin, Safir, Prismatisk, ...). An enchant fits when it shares a
+        // tag with the item and its restrict_to_* flags allow the item. Ranged enchants
+        // live in their own Distansvapen slot, never socketed here.
+        function canEnchantFit(item, enchant) {
+            if (!item || !enchant || !enchant.is_enchant || enchant.restrict_to_distance) return false;
+            if (enchant.restrict_to_two_hand && !item.is_two_handed) return false;
+            if (enchant.restrict_to_one_hand && item.is_two_handed) return false;
+            if (enchant.restrict_to_shields && !item.is_shield) return false;
+            const itemTags = new Set((item.enchant_tags || []).map(t => t.id));
+            return (enchant.enchant_tags || []).some(t => itemTags.has(t.id));
+        }
+
+        function getSlotEnchants(state, slot) {
+            if (slot === 'ranged') return [];
+            return ((state.enchants || {})[slot] || []).map(key => itemsByKey[key]).filter(Boolean);
+        }
+
+        function describeEnchant(enchant) {
+            const parts = [];
+            if (enchant.crit_rate) parts.push(`${enchant.crit_rate > 0 ? '+' : ''}${enchant.crit_rate}% perfekt träff`);
+            if (enchant.max_crit_rate) parts.push(`${enchant.max_crit_rate > 0 ? '+' : ''}${enchant.max_crit_rate}% PT-potential`);
+            if (enchant.increased_hit_rate) parts.push(`${enchant.increased_hit_rate > 0 ? '+' : ''}${enchant.increased_hit_rate} träffchans`);
+            if (enchant.min_damage || enchant.max_damage) parts.push(`skada ${enchant.min_damage || 0}/${enchant.max_damage || 0}`);
+            if (enchant.crit_damage_multiplier) parts.push(`+${enchant.crit_damage_multiplier}% skada vid perfekt träff`);
+            if (enchant.weight) parts.push(`vikt ${enchant.weight > 0 ? '+' : ''}${enchant.weight}`);
+            if (enchant.block_rate) parts.push(`blockchans ${enchant.block_rate}%`);
+            if (enchant.absorption) parts.push(`+${enchant.absorption} absorption`);
+            if (enchant.durability) parts.push(`hållbarhet ${enchant.durability > 0 ? '+' : ''}${enchant.durability}`);
+            (enchant.enchant_modifiers || []).forEach(m => {
+                const suffix = m.proc_type_name && m.proc_type_name !== 'applicering' ? ` (vid ${m.proc_type_name})` : '';
+                const v = String(m.enchant_value_display);
+                parts.push(`${m.enchantable_name} ${/^[-+]/.test(v) ? v : '+' + v}${suffix}`);
+            });
+            return parts.join(', ');
+        }
+
         function equipItem(slot, itemKey) {
             const item = itemsByKey[itemKey];
             if (!item) return;
+            if (buildState.equipped[slot] !== itemKey && buildState.enchants) delete buildState.enchants[slot];
             buildState.equipped[slot] = itemKey;
             if (slot === 'weapon' && item.is_two_handed) {
                 delete buildState.equipped.shield;
@@ -3690,7 +3779,48 @@
 
         function unequipItem(slot) {
             delete buildState.equipped[slot];
+            if (buildState.enchants) delete buildState.enchants[slot];
             renderBuildView();
+        }
+
+        function addEnchant(slot, index, enchantKey) {
+            buildState.enchants = buildState.enchants || {};
+            const list = (buildState.enchants[slot] || []).slice();
+            list[index] = enchantKey;
+            buildState.enchants[slot] = list.filter(Boolean);
+            closeSlotPicker();
+            renderBuildView();
+        }
+
+        function removeEnchant(slot, index) {
+            const list = ((buildState.enchants || {})[slot] || []).slice();
+            list.splice(index, 1);
+            buildState.enchants[slot] = list;
+            renderBuildView();
+        }
+
+        function openEnchantPicker(slot, index) {
+            const item = itemsByKey[buildState.equipped[slot]];
+            if (!item) return;
+            const matches = allItems.filter(e => canEnchantFit(item, e)).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+            activeSlotPicker = null;
+            document.getElementById('slotPickerModalTitle').textContent = 'Förtrollning: ' + item.name;
+            document.getElementById('slotPickerModalBody').innerHTML = `
+                <div class="items-grid">
+                    ${matches.map(e => `
+                        <div class="item-card" onclick="addEnchant('${slot}', ${index}, '${e.key}')">
+                            <div class="item-image">${e.asset?.url ? `<img src="${e.asset.url}" alt="${e.name}">` : ''}</div>
+                            <div class="item-info">
+                                <div class="item-name">${e.name}</div>
+                                <div class="item-type">${(e.enchant_tags || []).map(t => t.name).join(', ')}</div>
+                                <div class="item-stats">${escapeHtml(describeEnchant(e))}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                ${matches.length === 0 ? '<div class="empty-state"><p>Inga förtrollningar passar det här föremålet.</p></div>' : ''}
+            `;
+            document.getElementById('slotPickerModal').classList.add('active');
         }
 
         // Applies a build handed in via the `?build=` URL param (see capturePendingBuildImport
@@ -3701,7 +3831,7 @@
         // would risk equipping the wrong thing entirely. Matching by name against the item(s)
         // valid for the target slot is slower but unambiguous in practice.
         function applyBuildImport(data) {
-            buildState = { race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {} };
+            buildState = { race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {} };
             if (data.race && racesById[data.race]) buildState.race = data.race;
             if (data.level) buildState.level = Math.max(1, Math.min(50, parseInt(data.level, 10) || 1));
             if (data.baseStats) Object.assign(buildState.baseStats, data.baseStats);
@@ -3719,7 +3849,11 @@
             // order, so equipItem()'s two-handed-weapon-clears-shield logic below sees the
             // weapon first. The userscript sends a dual-wielded off-hand weapon as 'shield'.
             const nameBySlot = {};
-            (data.equipped || []).forEach(({ slot, name }) => { if (slot && name) nameBySlot[slot] = name; });
+            const enchantNamesBySlot = {};
+            (data.equipped || []).forEach(({ slot, name, enchants }) => {
+                if (slot && name) nameBySlot[slot] = name;
+                if (slot && Array.isArray(enchants)) enchantNamesBySlot[slot] = enchants;
+            });
 
             const unmatched = [];
             BUILD_SLOTS.forEach(def => {
@@ -3728,7 +3862,12 @@
                 const candidates = itemsByName[name] || [];
                 const item = candidates.find(candidate => def.matcher ? def.matcher(candidate) : def.typeNames.includes(candidate.type_name));
                 if (item) equipItem(def.slot, item.key);
-                else unmatched.push(name);
+                else { unmatched.push(name); return; }
+                (enchantNamesBySlot[def.slot] || []).forEach((enchantName, index) => {
+                    const enchant = (itemsByName[enchantName] || []).find(e => canEnchantFit(item, e));
+                    if (enchant) addEnchant(def.slot, index, enchant.key);
+                    else unmatched.push(enchantName + ' (förtrollning)');
+                });
             });
 
             openBuildView();
@@ -3786,6 +3925,21 @@
             `;
         }
 
+        function renderSlotEnchants(slot, item) {
+            if (slot === 'ranged' || !item.max_enchants) return '';
+            const enchants = getSlotEnchants(buildState, slot);
+            const rows = enchants.map((e, i) => `
+                <div class="build-slot-enchant" title="${escapeHtml(describeEnchant(e))}">
+                    <span onclick="event.stopPropagation(); openEnchantPicker('${slot}', ${i})" style="cursor:pointer;">💎 ${escapeHtml(e.name)}</span>
+                    <span onclick="event.stopPropagation(); removeEnchant('${slot}', ${i})" style="cursor:pointer;opacity:.6;">✕</span>
+                    <div class="info-note" style="margin:0;">${escapeHtml(describeEnchant(e))}</div>
+                </div>`);
+            if (enchants.length < item.max_enchants) {
+                rows.push(`<div class="build-slot-enchant"><span onclick="event.stopPropagation(); openEnchantPicker('${slot}', ${enchants.length})" style="cursor:pointer;opacity:.7;">+ Förtrollning</span></div>`);
+            }
+            return rows.join('');
+        }
+
         function renderBuildSlot(def, effective) {
             if (def.slot === 'shield' && isShieldBlocked()) {
                 return `
@@ -3818,6 +3972,7 @@
                         ${item.asset?.url ? `<img src="${item.asset.url}" alt="${item.name}">` : ''}
                         <span>${item.name}</span>
                     </div>
+                    ${renderSlotEnchants(def.slot, item)}
                     ${rangedNotes.map(n => `<div class="build-slot-warning">${n}</div>`).join('')}
                     ${warnings.map(w => `<div class="build-slot-warning">${w.hard ? '⚠' : 'ℹ'} ${w.text}</div>`).join('')}
                     <button class="build-slot-remove" onclick="event.stopPropagation(); unequipItem('${def.slot}')">Ta bort</button>
@@ -3937,7 +4092,7 @@
         function loadSavedBuild(name) {
             const saved = getSavedBuilds();
             if (!saved[name]) return;
-            buildState = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {} }, JSON.parse(JSON.stringify(saved[name])));
+            buildState = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {} }, JSON.parse(JSON.stringify(saved[name])));
             renderBuildView();
         }
 
