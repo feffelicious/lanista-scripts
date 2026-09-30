@@ -1214,6 +1214,14 @@
             color: #b5482f;
         }
 
+        .build-slot-enchant {
+            font-size: 0.8em;
+        }
+
+        .build-slot-enchant .info-note {
+            font-size: 0.9em;
+        }
+
         /* Base stats and weapon skills sit side by side once there's room, instead of one
            table stretched full-width with its number columns spread thin across it. */
         .stat-tables {
@@ -3310,9 +3318,16 @@
         // across the whole dataset, so it's the only thing slot matching relies on.
         const WEAPON_TYPE_NAMES = ['sword', 'axe', 'mace', 'spear', 'stave', 'chain'];
 
+        function isOffhandCandidate(item) {
+            if (item.type_name === 'shield') return true;
+            return WEAPON_TYPE_NAMES.includes(item.type_name) && !item.is_two_handed && !!item.can_dual_wield;
+        }
+
         const BUILD_SLOTS = [
             { slot: 'weapon', label: 'Vapen', typeNames: WEAPON_TYPE_NAMES },
-            { slot: 'shield', label: 'Sköld', typeNames: ['shield'] },
+            // The game's "Sköldhand" takes either a shield or a second one-handed weapon
+            // (dual wielding) - only weapons flagged can_dual_wield are allowed there.
+            { slot: 'shield', label: 'Sköldhand', matcher: isOffhandCandidate },
             { slot: 'head', label: 'Huvud', typeNames: ['head'] },
             { slot: 'shoulders', label: 'Axlar', typeNames: ['shoulders'] },
             { slot: 'chest', label: 'Harnesk', typeNames: ['chest'] },
@@ -3341,7 +3356,10 @@
             lifeStage: 'Ung',
             baseStats: {},
             weaponSkills: {},
-            equipped: {}
+            equipped: {},
+            enchants: {},
+            staticStats: {},
+            staticWeaponSkills: {}
         };
 
         let activeSlotPicker = null;
@@ -3369,7 +3387,7 @@
         function setCompareTarget(name) {
             const saved = getSavedBuilds();
             if (!saved[name]) return;
-            compareBuild = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {} }, JSON.parse(JSON.stringify(saved[name])));
+            compareBuild = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {}, staticStats: {}, staticWeaponSkills: {} }, JSON.parse(JSON.stringify(saved[name])));
             compareLabel = name;
             renderBuildView();
         }
@@ -3394,7 +3412,9 @@
         function describeSlotItem(state, slot) {
             const key = state.equipped[slot];
             const item = key ? itemsByKey[key] : null;
-            return item ? item.name : null;
+            if (!item) return null;
+            const enchants = getSlotEnchants(state, slot).map(e => e.name);
+            return enchants.length ? `${item.name} (${enchants.join(', ')})` : item.name;
         }
 
         function renderComparisonChanges() {
@@ -3450,11 +3470,14 @@
         function collectEquipmentBonuses(state = buildState) {
             const statTotals = {};
             const weaponTotals = {};
+            const statPct = {};
+            const weaponPct = {};
             let weight = 0;
             const combat = {
                 damageMin: 0, damageMax: 0, block: 0, critRate: 0, maxCritRate: 0, hitRate: 0,
                 rangedDamageMin: 0, rangedDamageMax: 0, rangedHitRate: 0, rangedCritRate: 0, rangedMaxCritRate: 0,
-                actions: 0, momentumMultiplier: 0, momentumChance: 0, momentumMax: 0
+                actions: 0, momentumMultiplier: 0, momentumChance: 0, momentumMax: 0,
+                offhandDamageMin: 0, offhandDamageMax: 0
             };
             const statMap = statBonusKeyMap();
             const weaponMap = weaponBonusKeyMap();
@@ -3477,10 +3500,15 @@
                     if (key) statTotals[key] = (statTotals[key] || 0) + value;
                 });
 
-                if (item.is_weapon) {
+                if (item.is_weapon && slot === 'shield') {
+                    // An off-hand weapon attacks separately from the main hand, so its damage
+                    // is tracked on its own rather than summed into the main weapon's range.
+                    combat.offhandDamageMin += item.base_damage_min || 0;
+                    combat.offhandDamageMax += item.base_damage_max || 0;
+                } else if (item.is_weapon) {
                     combat.damageMin += item.base_damage_min || 0;
                     combat.damageMax += item.base_damage_max || 0;
-                    // Only the single 'weapon' slot (see BUILD_SLOTS) can ever carry these, so
+                    // Only the main 'weapon' slot (see BUILD_SLOTS) reaches this branch, so
                     // summing is equivalent to "take this weapon's value" - same simplification
                     // already used for damageMin/damageMax above.
                     if (item.actions !== undefined && item.actions !== null) combat.actions += item.actions;
@@ -3520,7 +3548,44 @@
                 }
             });
 
-            return { statTotals, weaponTotals, weight, combat };
+            // Enchants socketed into weapons/shields (see getSlotEnchants). Only their
+            // always-on effects count: modifiers with proc_type_name 'applicering' and the
+            // enchant's own crit/hit/damage/weight fields. Modifiers that only trigger on an
+            // attack, block, dodge etc. are listed as notes on the slot instead.
+            Object.keys(state.equipped).forEach(slot => {
+                if (slot === 'shield' && isShieldBlocked(state)) return;
+                getSlotEnchants(state, slot).forEach(enchant => {
+                    weight += enchant.weight || 0;
+                    combat.critRate += enchant.crit_rate || 0;
+                    combat.maxCritRate += enchant.max_crit_rate || 0;
+                    combat.hitRate += enchant.increased_hit_rate || 0;
+                    if (slot === 'shield') {
+                        combat.offhandDamageMin += enchant.min_damage || 0;
+                        combat.offhandDamageMax += enchant.max_damage || 0;
+                    } else if (slot === 'weapon') {
+                        combat.damageMin += enchant.min_damage || 0;
+                        combat.damageMax += enchant.max_damage || 0;
+                    }
+                    (enchant.enchant_modifiers || []).forEach(mod => {
+                        if (mod.debuff || mod.proc_type_name !== 'applicering') return;
+                        const name = (mod.enchantable_name || '').toLowerCase().trim();
+                        const display = String(mod.enchant_value_display);
+                        const value = parseFloat(display) || 0;
+                        const isPct = display.endsWith('%');
+                        if (name.startsWith('vapenfärdigheten ')) {
+                            const key = weaponMap[name.replace('vapenfärdigheten ', '').trim()];
+                            const bucket = isPct ? weaponPct : weaponTotals;
+                            if (key) bucket[key] = (bucket[key] || 0) + value;
+                            return;
+                        }
+                        const key = statMap[name];
+                        const bucket = isPct ? statPct : statTotals;
+                        if (key) bucket[key] = (bucket[key] || 0) + value;
+                    });
+                });
+            });
+
+            return { statTotals, weaponTotals, statPct, weaponPct, weight, combat };
         }
 
         function computeEffectiveStats(state = buildState) {
@@ -3532,14 +3597,20 @@
             (raceData ? Object.keys(raceData.statLabels) : []).forEach(key => {
                 const base = state.baseStats[key] || 0;
                 const racePct = race ? (race.statMods[key] || 0) : 0;
-                const agePct = ageStage ? (ageStage.statMods[key] || 0) : 0;
+                // The game's own "utplacerade värden" (what the userscript imports) already
+                // include the age modifier, so it's only applied here for hand-entered points.
+                const agePct = ageStage && !state.ageInBase ? (ageStage.statMods[key] || 0) : 0;
                 let levelPct = 0;
                 if (race && race.levelBonus && race.levelBonus.perLevel[key] && state.level > race.levelBonus.aboveLevel) {
                     levelPct = (state.level - race.levelBonus.aboveLevel) * race.levelBonus.perLevel[key];
                 }
-                const afterMod = base * (1 + (racePct + agePct + levelPct) / 100);
+                const enchantPct = equip.statPct[key] || 0;
+                const afterMod = base * (1 + (racePct + agePct + levelPct + enchantPct) / 100);
                 const equipFlat = equip.statTotals[key] || 0;
-                stats[key] = { base, racePct, agePct, levelPct, equipFlat, total: afterMod + equipFlat, capped: false };
+                // "Statiskt" in the game's own stat table: a flat amount added on top of
+                // everything else (Tot. = Nu + Statiskt), untouched by race/age modifiers.
+                const staticFlat = (state.staticStats || {})[key] || 0;
+                stats[key] = { base, racePct, agePct, levelPct, equipFlat, staticFlat, total: afterMod + equipFlat + staticFlat, capped: false };
             });
 
             // Bashälsa (HP) can never exceed 5.5x effective Styrka - the one exact formula
@@ -3556,10 +3627,11 @@
             WEAPON_SKILL_KEYS.forEach(key => {
                 const base = state.weaponSkills[key] || 0;
                 const racePct = race ? (race.weaponMods[key] || 0) : 0;
-                const agePct = ageStage ? (ageStage.weaponModAll || 0) : 0;
-                const afterMod = base * (1 + (racePct + agePct) / 100);
+                const agePct = ageStage && !state.ageInBase ? (ageStage.weaponModAll || 0) : 0;
+                const afterMod = base * (1 + (racePct + agePct + (equip.weaponPct[key] || 0)) / 100);
                 const equipFlat = equip.weaponTotals[key] || 0;
-                weaponSkills[key] = { base, racePct, agePct, equipFlat, total: afterMod + equipFlat };
+                const staticFlat = (state.staticWeaponSkills || {})[key] || 0;
+                weaponSkills[key] = { base, racePct, agePct, equipFlat, staticFlat, total: afterMod + equipFlat + staticFlat };
             });
 
             const totalWeight = (race ? race.baseWeight : 0) + equip.weight;
@@ -3570,7 +3642,7 @@
         // operative numbers/names in <strong> tags, so warnings are parsed straight off
         // that text rather than the requirementable_id scheme (see docs/index.html history
         // of stat-model bugs from re-deriving "what field means what" per item shape).
-        function checkRequirements(item, effective) {
+        function checkRequirements(item, effective, slot) {
             const warnings = [];
             const level = getItemLevel(item);
             if (level && buildState.level < level) {
@@ -3590,7 +3662,10 @@
 
                 const statMatch = text.match(/minst\s*<strong>(\d+)<\/strong>\s*i egenskapen\s*<strong>([^<]+)<\/strong>/i);
                 if (statMatch) {
-                    const needed = parseInt(statMatch[1], 10);
+                    // Wielding a weapon in the off hand raises its strength requirement -
+                    // the game ships that stricter value separately as offhand_requirement.
+                    const offhandNeeded = slot === 'shield' && item.is_weapon && req.offhand_requirement;
+                    const needed = offhandNeeded ? req.offhand_requirement : parseInt(statMatch[1], 10);
                     const label = statMatch[2].trim();
                     const key = statBonusKeyMap()[label.toLowerCase()];
                     const have = key && effective.stats[key] ? effective.stats[key].total : 0;
@@ -3644,8 +3719,19 @@
             renderBuildView();
         }
 
+        function setAgeInBase(checked) {
+            buildState.ageInBase = !!checked;
+            renderBuildView();
+        }
+
         function setBaseStat(key, value) {
             buildState.baseStats[key] = Math.max(0, parseInt(value, 10) || 0);
+            renderBuildView();
+        }
+
+        function setStaticValue(group, key, value) {
+            buildState[group] = buildState[group] || {};
+            buildState[group][key] = parseFloat(value) || 0;
             renderBuildView();
         }
 
@@ -3654,9 +3740,47 @@
             renderBuildView();
         }
 
+        // Weapons and shields carry max_enchants (1, or 2 for most two-handers) and a list
+        // of enchant_tags (Rubin, Safir, Prismatisk, ...). An enchant fits when it shares a
+        // tag with the item and its restrict_to_* flags allow the item. Ranged enchants
+        // live in their own Distansvapen slot, never socketed here.
+        function canEnchantFit(item, enchant) {
+            if (!item || !enchant || !enchant.is_enchant || enchant.restrict_to_distance) return false;
+            if (enchant.restrict_to_two_hand && !item.is_two_handed) return false;
+            if (enchant.restrict_to_one_hand && item.is_two_handed) return false;
+            if (enchant.restrict_to_shields && !item.is_shield) return false;
+            const itemTags = new Set((item.enchant_tags || []).map(t => t.id));
+            return (enchant.enchant_tags || []).some(t => itemTags.has(t.id));
+        }
+
+        function getSlotEnchants(state, slot) {
+            if (slot === 'ranged') return [];
+            return ((state.enchants || {})[slot] || []).map(key => itemsByKey[key]).filter(Boolean);
+        }
+
+        function describeEnchant(enchant) {
+            const parts = [];
+            if (enchant.crit_rate) parts.push(`${enchant.crit_rate > 0 ? '+' : ''}${enchant.crit_rate}% perfekt träff`);
+            if (enchant.max_crit_rate) parts.push(`${enchant.max_crit_rate > 0 ? '+' : ''}${enchant.max_crit_rate}% PT-potential`);
+            if (enchant.increased_hit_rate) parts.push(`${enchant.increased_hit_rate > 0 ? '+' : ''}${enchant.increased_hit_rate} träffchans`);
+            if (enchant.min_damage || enchant.max_damage) parts.push(`skada ${enchant.min_damage || 0}/${enchant.max_damage || 0}`);
+            if (enchant.crit_damage_multiplier) parts.push(`+${enchant.crit_damage_multiplier}% skada vid perfekt träff`);
+            if (enchant.weight) parts.push(`vikt ${enchant.weight > 0 ? '+' : ''}${enchant.weight}`);
+            if (enchant.block_rate) parts.push(`blockchans ${enchant.block_rate}%`);
+            if (enchant.absorption) parts.push(`+${enchant.absorption} absorption`);
+            if (enchant.durability) parts.push(`hållbarhet ${enchant.durability > 0 ? '+' : ''}${enchant.durability}`);
+            (enchant.enchant_modifiers || []).forEach(m => {
+                const suffix = m.proc_type_name && m.proc_type_name !== 'applicering' ? ` (vid ${m.proc_type_name})` : '';
+                const v = String(m.enchant_value_display);
+                parts.push(`${m.enchantable_name} ${/^[-+]/.test(v) ? v : '+' + v}${suffix}`);
+            });
+            return parts.join(', ');
+        }
+
         function equipItem(slot, itemKey) {
             const item = itemsByKey[itemKey];
             if (!item) return;
+            if (buildState.equipped[slot] !== itemKey && buildState.enchants) delete buildState.enchants[slot];
             buildState.equipped[slot] = itemKey;
             if (slot === 'weapon' && item.is_two_handed) {
                 delete buildState.equipped.shield;
@@ -3667,7 +3791,48 @@
 
         function unequipItem(slot) {
             delete buildState.equipped[slot];
+            if (buildState.enchants) delete buildState.enchants[slot];
             renderBuildView();
+        }
+
+        function addEnchant(slot, index, enchantKey) {
+            buildState.enchants = buildState.enchants || {};
+            const list = (buildState.enchants[slot] || []).slice();
+            list[index] = enchantKey;
+            buildState.enchants[slot] = list.filter(Boolean);
+            closeSlotPicker();
+            renderBuildView();
+        }
+
+        function removeEnchant(slot, index) {
+            const list = ((buildState.enchants || {})[slot] || []).slice();
+            list.splice(index, 1);
+            buildState.enchants[slot] = list;
+            renderBuildView();
+        }
+
+        function openEnchantPicker(slot, index) {
+            const item = itemsByKey[buildState.equipped[slot]];
+            if (!item) return;
+            const matches = allItems.filter(e => canEnchantFit(item, e)).sort((a, b) => a.name.localeCompare(b.name, 'sv'));
+            activeSlotPicker = null;
+            document.getElementById('slotPickerModalTitle').textContent = 'Förtrollning: ' + item.name;
+            document.getElementById('slotPickerModalBody').innerHTML = `
+                <div class="items-grid">
+                    ${matches.map(e => `
+                        <div class="item-card" onclick="addEnchant('${slot}', ${index}, '${e.key}')">
+                            <div class="item-image">${e.asset?.url ? `<img src="${e.asset.url}" alt="${e.name}">` : ''}</div>
+                            <div class="item-info">
+                                <div class="item-name">${e.name}</div>
+                                <div class="item-type">${(e.enchant_tags || []).map(t => t.name).join(', ')}</div>
+                                <div class="item-stats">${escapeHtml(describeEnchant(e))}</div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                ${matches.length === 0 ? '<div class="empty-state"><p>Inga förtrollningar passar det här föremålet.</p></div>' : ''}
+            `;
+            document.getElementById('slotPickerModal').classList.add('active');
         }
 
         // Applies a build handed in via the `?build=` URL param (see capturePendingBuildImport
@@ -3678,11 +3843,15 @@
         // would risk equipping the wrong thing entirely. Matching by name against the item(s)
         // valid for the target slot is slower but unambiguous in practice.
         function applyBuildImport(data) {
-            buildState = { race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {} };
+            buildState = { race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {}, staticStats: {}, staticWeaponSkills: {} };
             if (data.race && racesById[data.race]) buildState.race = data.race;
             if (data.level) buildState.level = Math.max(1, Math.min(50, parseInt(data.level, 10) || 1));
             if (data.baseStats) Object.assign(buildState.baseStats, data.baseStats);
             if (data.weaponSkills) Object.assign(buildState.weaponSkills, data.weaponSkills);
+            if (data.staticStats) Object.assign(buildState.staticStats, data.staticStats);
+            if (data.staticWeaponSkills) Object.assign(buildState.staticWeaponSkills, data.staticWeaponSkills);
+            // The userscript sends the game's "utplacerade värden", which have age baked in.
+            buildState.ageInBase = true;
 
             const race = buildState.race ? racesById[buildState.race] : null;
             if (race) {
@@ -3692,9 +3861,13 @@
 
             // Applied in BUILD_SLOTS order (weapon before shield) rather than the payload's own
             // order, so equipItem()'s two-handed-weapon-clears-shield logic below sees the
-            // weapon first - not that a real character could have both equipped anyway.
+            // weapon first. The userscript sends a dual-wielded off-hand weapon as 'shield'.
             const nameBySlot = {};
-            (data.equipped || []).forEach(({ slot, name }) => { if (slot && name) nameBySlot[slot] = name; });
+            const enchantNamesBySlot = {};
+            (data.equipped || []).forEach(({ slot, name, enchants }) => {
+                if (slot && name) nameBySlot[slot] = name;
+                if (slot && Array.isArray(enchants)) enchantNamesBySlot[slot] = enchants;
+            });
 
             const unmatched = [];
             BUILD_SLOTS.forEach(def => {
@@ -3703,7 +3876,12 @@
                 const candidates = itemsByName[name] || [];
                 const item = candidates.find(candidate => def.matcher ? def.matcher(candidate) : def.typeNames.includes(candidate.type_name));
                 if (item) equipItem(def.slot, item.key);
-                else unmatched.push(name);
+                else { unmatched.push(name); return; }
+                (enchantNamesBySlot[def.slot] || []).forEach((enchantName, index) => {
+                    const enchant = (itemsByName[enchantName] || []).find(e => canEnchantFit(item, e));
+                    if (enchant) addEnchant(def.slot, index, enchant.key);
+                    else unmatched.push(enchantName + ' (förtrollning)');
+                });
             });
 
             openBuildView();
@@ -3761,6 +3939,21 @@
             `;
         }
 
+        function renderSlotEnchants(slot, item) {
+            if (slot === 'ranged' || !item.max_enchants) return '';
+            const enchants = getSlotEnchants(buildState, slot);
+            const rows = enchants.map((e, i) => `
+                <div class="build-slot-enchant" title="${escapeHtml(describeEnchant(e))}">
+                    <span onclick="event.stopPropagation(); openEnchantPicker('${slot}', ${i})" style="cursor:pointer;">💎 ${escapeHtml(e.name)}</span>
+                    <span onclick="event.stopPropagation(); removeEnchant('${slot}', ${i})" style="cursor:pointer;opacity:.6;">✕</span>
+                    <div class="info-note" style="margin:0;">${escapeHtml(describeEnchant(e))}</div>
+                </div>`);
+            if (enchants.length < item.max_enchants) {
+                rows.push(`<div class="build-slot-enchant"><span onclick="event.stopPropagation(); openEnchantPicker('${slot}', ${enchants.length})" style="cursor:pointer;opacity:.7;">+ Förtrollning</span></div>`);
+            }
+            return rows.join('');
+        }
+
         function renderBuildSlot(def, effective) {
             if (def.slot === 'shield' && isShieldBlocked()) {
                 return `
@@ -3783,7 +3976,7 @@
                 `;
             }
 
-            const warnings = checkRequirements(item, effective);
+            const warnings = checkRequirements(item, effective, def.slot);
             const hardUnmet = warnings.some(w => w.hard);
             const rangedNotes = def.slot === 'ranged' ? [describeRangedAttack(item), describeRangedProc(item)].filter(Boolean) : [];
             return `
@@ -3793,6 +3986,7 @@
                         ${item.asset?.url ? `<img src="${item.asset.url}" alt="${item.name}">` : ''}
                         <span>${item.name}</span>
                     </div>
+                    ${renderSlotEnchants(def.slot, item)}
                     ${rangedNotes.map(n => `<div class="build-slot-warning">${n}</div>`).join('')}
                     ${warnings.map(w => `<div class="build-slot-warning">${w.hard ? '⚠' : 'ℹ'} ${w.text}</div>`).join('')}
                     <button class="build-slot-remove" onclick="event.stopPropagation(); unequipItem('${def.slot}')">Ta bort</button>
@@ -3840,6 +4034,7 @@
                         <td>${s.racePct >= 0 ? '+' : ''}${s.racePct}%</td>
                         <td>${s.agePct >= 0 ? '+' : ''}${s.agePct}%${s.levelPct ? ` (+${s.levelPct} niv.)` : ''}</td>
                         <td>${s.equipFlat >= 0 ? '+' : ''}${Math.round(s.equipFlat * 10) / 10}</td>
+                        <td>${s.staticFlat >= 0 ? '+' : ''}${Math.round(s.staticFlat * 10) / 10}</td>
                         <td class="total ${s.capped ? 'capped' : ''}">${Math.round(s.total * 10) / 10}${s.capped ? ' (max)' : ''}</td>
                         ${deltaTd}
                     </tr>
@@ -3856,6 +4051,7 @@
                         <td>${s.racePct >= 0 ? '+' : ''}${s.racePct}%</td>
                         <td>${s.agePct >= 0 ? '+' : ''}${s.agePct}%</td>
                         <td>${s.equipFlat >= 0 ? '+' : ''}${Math.round(s.equipFlat * 10) / 10}</td>
+                        <td>${s.staticFlat >= 0 ? '+' : ''}${Math.round(s.staticFlat * 10) / 10}</td>
                         <td class="total">${Math.round(s.total * 10) / 10}</td>
                         ${deltaTd}
                     </tr>
@@ -3867,14 +4063,14 @@
                     <div class="stat-table-block">
                         <h4 class="stat-table-heading">Grundegenskaper</h4>
                         <table class="${tableClass}">
-                            <thead><tr><th>Egenskap</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Totalt</th>${deltaTh}</tr></thead>
+                            <thead><tr><th>Egenskap</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Statiskt</th><th>Totalt</th>${deltaTh}</tr></thead>
                             <tbody>${statRows}</tbody>
                         </table>
                     </div>
                     <div class="stat-table-block">
                         <h4 class="stat-table-heading">Vapenfärdigheter</h4>
                         <table class="${tableClass}">
-                            <thead><tr><th>Färdighet</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Totalt</th>${deltaTh}</tr></thead>
+                            <thead><tr><th>Färdighet</th><th>Bas</th><th>Ras %</th><th>Ålder %</th><th>Utrustning</th><th>Statiskt</th><th>Totalt</th>${deltaTh}</tr></thead>
                             <tbody>${weaponRows}</tbody>
                         </table>
                     </div>
@@ -3912,7 +4108,7 @@
         function loadSavedBuild(name) {
             const saved = getSavedBuilds();
             if (!saved[name]) return;
-            buildState = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {} }, JSON.parse(JSON.stringify(saved[name])));
+            buildState = Object.assign({ race: null, level: 1, lifeStage: 'Ung', baseStats: {}, weaponSkills: {}, equipped: {}, enchants: {}, staticStats: {}, staticWeaponSkills: {} }, JSON.parse(JSON.stringify(saved[name])));
             renderBuildView();
         }
 
@@ -4021,6 +4217,7 @@
                         <div class="build-panel">
                             <h3>Grundegenskaper</h3>
                             <p class="info-note">Fyll i poängen du faktiskt spenderat på din karaktär - spelet exponerar ingen formel för nivå → poäng, så det här replikerar din riktiga karaktär i stället för att räkna ut den.</p>
+                            <label class="info-note" style="display:flex;gap:6px;align-items:center;cursor:pointer;"><input type="checkbox" ${buildState.ageInBase ? 'checked' : ''} onchange="setAgeInBase(this.checked)"> Värdena inkluderar redan ålder (spelets "utplacerade värden")</label>
                             <div class="build-stats-grid">
                                 ${Object.keys(raceData.statLabels).map(key => `
                                     <div class="build-stat-input">
@@ -4038,6 +4235,24 @@
                                     </div>
                                 `).join('')}
                             </div>
+                            <details style="margin-top: 20px;">
+                                <summary style="cursor:pointer;">Statiska värden</summary>
+                                <p class="info-note">Spelets kolumn "Statiskt" - läggs till ovanpå allt annat och påverkas inte av ras eller ålder.</p>
+                                <div class="build-stats-grid">
+                                    ${Object.keys(raceData.statLabels).map(key => `
+                                        <div class="build-stat-input">
+                                            <label>${raceData.statLabels[key]}</label>
+                                            <input type="number" step="any" value="${(buildState.staticStats || {})[key] || 0}" onchange="setStaticValue('staticStats', '${key}', this.value)">
+                                        </div>
+                                    `).join('')}
+                                    ${WEAPON_SKILL_KEYS.map(key => `
+                                        <div class="build-stat-input">
+                                            <label>${raceData.weaponSkillLabels[key]}</label>
+                                            <input type="number" step="any" value="${(buildState.staticWeaponSkills || {})[key] || 0}" onchange="setStaticValue('staticWeaponSkills', '${key}', this.value)">
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </details>
                         </div>
                     </div>
 
@@ -4064,6 +4279,7 @@
                             <h3>Stridsvärden från utrustning</h3>
                             <div class="stat-grid build-combat-grid">
                                 <div class="stat-item"><div class="stat-label">Vapenskada</div><div class="stat-value">${effective.combat.damageMax ? formatRange(effective.combat.damageMin, effective.combat.damageMax) : '-'}</div></div>
+                                ${effective.combat.offhandDamageMax ? `<div class="stat-item"><div class="stat-label">Vapenskada (sköldhand)</div><div class="stat-value">${formatRange(effective.combat.offhandDamageMin, effective.combat.offhandDamageMax)}${effective.race && effective.race.offhandDamagePct ? ` <small>(${effective.race.offhandDamagePct}% för rasen)</small>` : ''}</div></div>` : ''}
                                 <div class="stat-item"><div class="stat-label">Distansskada</div><div class="stat-value">${effective.combat.rangedDamageMax ? formatRange(effective.combat.rangedDamageMin, effective.combat.rangedDamageMax) : '-'}</div></div>
                                 <div class="stat-item"><div class="stat-label">Blockering</div><div class="stat-value">${effective.combat.block || '-'}</div>${compareEffective ? formatDelta(effective.combat.block - compareEffective.combat.block, 0) : ''}</div>
                                 <div class="stat-item"><div class="stat-label">Perfekt träff (utrustning)</div><div class="stat-value">${effective.combat.critRate ? '+' + effective.combat.critRate + '%' : '-'}</div>${compareEffective ? formatDelta(effective.combat.critRate - compareEffective.combat.critRate) : ''}</div>

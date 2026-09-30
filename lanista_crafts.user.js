@@ -2,7 +2,7 @@
 // @name        Lanista scripts
 // @namespace   Violentmonkey Scripts
 // @icon        data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAC5UlEQVQ4T6WTS0gbYRSFz6+jySAaEQtqFiJEKaLQLEpwo5L6AmEkEnxU69KpRsTQwtStGylpjRvdWSxoJTF2obhQLAhiEIoU20TbWhVrlYQ2JkYZdZhxyvwS6QO66VnNhXO/ew78Q/CfIjdfv6i7u5snhPhGRkYi2tzb2/uAYZjloaGhg4QnIQro6up6mJmZOT04OEgXeJ7/pijKgSzLHePj49sOh2OJZVkjIaTT5XKtaEBZlpdHR0cPKKCnp+eQZdmvADpcLte20+l85Ha7n1/fAP6ceZ5fkmU5T1EUngL6+voeDw8PP0sYnE6n0+12u/8x3wApQBCEJ4IgBJKTiTUaPbkjSZI5Ho8nhcNhPcMwik6nk0tLS3clSfrM6nRvPdPT2TzPCxQQiUTqRFF8LUkSOzY2hlAohJKSEuTl5WJhYZFezM/PR1lZGXw+HwoKCtDU1ISsrKxVVVU7SfT4+PurqalsQgiMRiNmZ2eRmpqK5uZm+P1+XF1doaioEBsb73F0dISqqntgmBQoioyamtpPZH9/X1xcXGQ1c05ODurr6xEOhxCLneDi4gIamGVZGAwZyMgwUOje3h7MZjNsNluUbG5uigDYQOADtre/wGQyYWdnB7Is0/gJaaDCQhO2tj7SShaLRUt3DYjH42xaWho1SpIEvV6Ps7MzXF5e0gpapfT0dJyfn9M0mrQDDMNcAzweD1tXVwdVVelySkoKwuEwgsEgNRcXF9N6Gkw7oKWZm5uD3W6PkmAwKHq9XrayshLr6+sUUltbC6/XC1HU2oEmaGlpwcrKCk1WXl6O+fl5tLa2RkkgEHjp8/k6KioqKOD09BQcx2FycpIuJ9TY2EgBiqLAarXSBO3t7W+IqqpEEIT7HMc51tbWLNoDamho+Atgs9mwurpKu1dXVx/OzMy8aGtre/rb39jf339Lp9Pd5Tju9sTERG5SUpJBVVUGgGi323/4/f7dWCz2bmBgIEAIUbWdn0Q7ZfawRhyhAAAAAElFTkSuQmCC
-// @version     1.25.4
+// @version     1.27.0
 //
 // @match       https://lanista.se/game/*
 // @match       https://lanista.se/
@@ -1887,25 +1887,60 @@
 			const name = buildSimRangedEnchantName(item);
 			return name ? { slot, name } : null;
 		}
-		return { slot, name: item.name };
+		return { slot, name: item.name, enchants: buildSimEnchantNames(item) };
+	}
+
+	// Enchants socketed into a weapon/shield (Svartalvspergament, Elegant Opak Rubin, ...) sit
+	// under the item's own `enchants[].enchant`, same shape as the ranged enchant above. They're
+	// handed over by name and matched against the simulator's catalogue like the items are.
+	function buildSimEnchantNames(item) {
+		return (item.enchants || [])
+			.map((entry) => entry && entry.enchant && entry.enchant.name)
+			.filter(Boolean);
+	}
+
+	// A one-handed weapon wielded in the "Sköldhand" (dual wielding) has the same weapon
+	// type_name as the main-hand weapon, so type alone would send both to the simulator's
+	// 'weapon' slot and the off-hand one would be lost. Confirmed live (2026-09-30):
+	// /api/avatars/me flags each equipped item with main_hand/off_hand booleans, and item
+	// order is not reliable (the off-hand weapon can come first).
+	function buildSimFindOffhandWeapon(equippedItems) {
+		return equippedItems.find((item) => item.off_hand && BUILD_SIM_WEAPON_TYPE_NAMES.has(item.type_name)) || null;
+	}
+
+	// The stats page's "Statiskt" column - a flat amount on top of everything (Tot. = Nu +
+	// Statiskt). Confirmed live: each /api/avatars/me stat/weapon-skill entry carries it as
+	// static_value, next to `value` (the spent points incl. age, which is what's imported).
+	function buildSimStaticValue(entry) {
+		return typeof entry.static_value === 'number' ? entry.static_value : null;
 	}
 
 	function buildSimImportPayload(avatar) {
 		const baseStats = {};
+		const staticStats = {};
 		(avatar.stats || []).forEach((stat) => {
 			const key = BUILD_SIM_STAT_MAP[stat.name];
-			if (key) baseStats[key] = stat.value;
+			if (!key) return;
+			baseStats[key] = stat.value;
+			const staticValue = buildSimStaticValue(stat);
+			if (staticValue) staticStats[key] = staticValue;
 		});
 
 		const weaponSkills = {};
+		const staticWeaponSkills = {};
 		(avatar.weapon_skills || []).forEach((skill) => {
 			const key = BUILD_SIM_WEAPON_SKILL_MAP[skill.name];
-			if (key) weaponSkills[key] = skill.value;
+			if (!key) return;
+			weaponSkills[key] = skill.value;
+			const staticValue = buildSimStaticValue(skill);
+			if (staticValue) staticWeaponSkills[key] = staticValue;
 		});
 
-		const equipped = (avatar.items || [])
-			.filter((item) => item.equipped)
-			.map(buildSimEquippedEntry)
+
+		const equippedItems = (avatar.items || []).filter((item) => item.equipped);
+		const offhandItem = buildSimFindOffhandWeapon(equippedItems);
+		const equipped = equippedItems
+			.map((item) => item === offhandItem ? { slot: 'shield', name: item.name, enchants: buildSimEnchantNames(item) } : buildSimEquippedEntry(item))
 			.filter(Boolean);
 
 		return {
@@ -1914,6 +1949,8 @@
 			lifeStage: avatar.age_display,
 			baseStats,
 			weaponSkills,
+			staticStats,
+			staticWeaponSkills,
 			equipped
 		};
 	}
