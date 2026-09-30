@@ -3310,9 +3310,16 @@
         // across the whole dataset, so it's the only thing slot matching relies on.
         const WEAPON_TYPE_NAMES = ['sword', 'axe', 'mace', 'spear', 'stave', 'chain'];
 
+        function isOffhandCandidate(item) {
+            if (item.type_name === 'shield') return true;
+            return WEAPON_TYPE_NAMES.includes(item.type_name) && !item.is_two_handed && !!item.can_dual_wield;
+        }
+
         const BUILD_SLOTS = [
             { slot: 'weapon', label: 'Vapen', typeNames: WEAPON_TYPE_NAMES },
-            { slot: 'shield', label: 'Sköld', typeNames: ['shield'] },
+            // The game's "Sköldhand" takes either a shield or a second one-handed weapon
+            // (dual wielding) - only weapons flagged can_dual_wield are allowed there.
+            { slot: 'shield', label: 'Sköldhand', matcher: isOffhandCandidate },
             { slot: 'head', label: 'Huvud', typeNames: ['head'] },
             { slot: 'shoulders', label: 'Axlar', typeNames: ['shoulders'] },
             { slot: 'chest', label: 'Harnesk', typeNames: ['chest'] },
@@ -3454,7 +3461,8 @@
             const combat = {
                 damageMin: 0, damageMax: 0, block: 0, critRate: 0, maxCritRate: 0, hitRate: 0,
                 rangedDamageMin: 0, rangedDamageMax: 0, rangedHitRate: 0, rangedCritRate: 0, rangedMaxCritRate: 0,
-                actions: 0, momentumMultiplier: 0, momentumChance: 0, momentumMax: 0
+                actions: 0, momentumMultiplier: 0, momentumChance: 0, momentumMax: 0,
+                offhandDamageMin: 0, offhandDamageMax: 0
             };
             const statMap = statBonusKeyMap();
             const weaponMap = weaponBonusKeyMap();
@@ -3477,10 +3485,15 @@
                     if (key) statTotals[key] = (statTotals[key] || 0) + value;
                 });
 
-                if (item.is_weapon) {
+                if (item.is_weapon && slot === 'shield') {
+                    // An off-hand weapon attacks separately from the main hand, so its damage
+                    // is tracked on its own rather than summed into the main weapon's range.
+                    combat.offhandDamageMin += item.base_damage_min || 0;
+                    combat.offhandDamageMax += item.base_damage_max || 0;
+                } else if (item.is_weapon) {
                     combat.damageMin += item.base_damage_min || 0;
                     combat.damageMax += item.base_damage_max || 0;
-                    // Only the single 'weapon' slot (see BUILD_SLOTS) can ever carry these, so
+                    // Only the main 'weapon' slot (see BUILD_SLOTS) reaches this branch, so
                     // summing is equivalent to "take this weapon's value" - same simplification
                     // already used for damageMin/damageMax above.
                     if (item.actions !== undefined && item.actions !== null) combat.actions += item.actions;
@@ -3570,7 +3583,7 @@
         // operative numbers/names in <strong> tags, so warnings are parsed straight off
         // that text rather than the requirementable_id scheme (see docs/index.html history
         // of stat-model bugs from re-deriving "what field means what" per item shape).
-        function checkRequirements(item, effective) {
+        function checkRequirements(item, effective, slot) {
             const warnings = [];
             const level = getItemLevel(item);
             if (level && buildState.level < level) {
@@ -3590,7 +3603,10 @@
 
                 const statMatch = text.match(/minst\s*<strong>(\d+)<\/strong>\s*i egenskapen\s*<strong>([^<]+)<\/strong>/i);
                 if (statMatch) {
-                    const needed = parseInt(statMatch[1], 10);
+                    // Wielding a weapon in the off hand raises its strength requirement -
+                    // the game ships that stricter value separately as offhand_requirement.
+                    const offhandNeeded = slot === 'shield' && item.is_weapon && req.offhand_requirement;
+                    const needed = offhandNeeded ? req.offhand_requirement : parseInt(statMatch[1], 10);
                     const label = statMatch[2].trim();
                     const key = statBonusKeyMap()[label.toLowerCase()];
                     const have = key && effective.stats[key] ? effective.stats[key].total : 0;
@@ -3692,7 +3708,7 @@
 
             // Applied in BUILD_SLOTS order (weapon before shield) rather than the payload's own
             // order, so equipItem()'s two-handed-weapon-clears-shield logic below sees the
-            // weapon first - not that a real character could have both equipped anyway.
+            // weapon first. The userscript sends a dual-wielded off-hand weapon as 'shield'.
             const nameBySlot = {};
             (data.equipped || []).forEach(({ slot, name }) => { if (slot && name) nameBySlot[slot] = name; });
 
@@ -3783,7 +3799,7 @@
                 `;
             }
 
-            const warnings = checkRequirements(item, effective);
+            const warnings = checkRequirements(item, effective, def.slot);
             const hardUnmet = warnings.some(w => w.hard);
             const rangedNotes = def.slot === 'ranged' ? [describeRangedAttack(item), describeRangedProc(item)].filter(Boolean) : [];
             return `
@@ -4064,6 +4080,7 @@
                             <h3>Stridsvärden från utrustning</h3>
                             <div class="stat-grid build-combat-grid">
                                 <div class="stat-item"><div class="stat-label">Vapenskada</div><div class="stat-value">${effective.combat.damageMax ? formatRange(effective.combat.damageMin, effective.combat.damageMax) : '-'}</div></div>
+                                ${effective.combat.offhandDamageMax ? `<div class="stat-item"><div class="stat-label">Vapenskada (sköldhand)</div><div class="stat-value">${formatRange(effective.combat.offhandDamageMin, effective.combat.offhandDamageMax)}${effective.race && effective.race.offhandDamagePct ? ` <small>(${effective.race.offhandDamagePct}% för rasen)</small>` : ''}</div></div>` : ''}
                                 <div class="stat-item"><div class="stat-label">Distansskada</div><div class="stat-value">${effective.combat.rangedDamageMax ? formatRange(effective.combat.rangedDamageMin, effective.combat.rangedDamageMax) : '-'}</div></div>
                                 <div class="stat-item"><div class="stat-label">Blockering</div><div class="stat-value">${effective.combat.block || '-'}</div>${compareEffective ? formatDelta(effective.combat.block - compareEffective.combat.block, 0) : ''}</div>
                                 <div class="stat-item"><div class="stat-label">Perfekt träff (utrustning)</div><div class="stat-value">${effective.combat.critRate ? '+' + effective.combat.critRate + '%' : '-'}</div>${compareEffective ? formatDelta(effective.combat.critRate - compareEffective.combat.critRate) : ''}</div>
