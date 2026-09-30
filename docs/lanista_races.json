@@ -154,8 +154,8 @@
       ],
       "ageStages": [
         { "name": "Ung", "days": 0, "statMods": {}, "weaponModAll": 0 },
-        { "name": "Vuxen", "days": 14, "statMods": { "bashalsa": 7, "styrka": 12, "uthallighet": 7, "initiativ": 3, "undvika": 2, "ledarskap": 5, "larande": 0, "provokation": 5 }, "weaponModAll": 0 },
-        { "name": "Medelålders", "days": 26, "statMods": { "bashalsa": -5, "styrka": -5, "uthallighet": -5, "initiativ": -5, "undvika": -5, "ledarskap": 10 }, "weaponModAll": 0 },
+        { "name": "Vuxen", "days": 14, "statMods": { "bashalsa": 7, "styrka": 12, "uthallighet": 7, "initiativ": 3, "undvika": 2, "ledarskap": 0, "larande": 0, "provokation": 0 }, "weaponModAll": 0 },
+        { "name": "Medelålders", "days": 26, "statMods": { "bashalsa": -5, "styrka": -5, "uthallighet": -5, "initiativ": -5, "undvika": -5, "ledarskap": 0 }, "weaponModAll": 0 },
         { "name": "Gammal", "days": 39, "statMods": { "bashalsa": -8, "styrka": -8, "uthallighet": -8, "initiativ": -9, "undvika": -9, "ledarskap": 15 }, "weaponModAll": -5 },
         { "name": "Uråldrig", "days": 47, "statMods": { "bashalsa": -12, "styrka": -12, "uthallighet": -12, "initiativ": -12, "undvika": -12, "ledarskap": 20, "provokation": -30 }, "weaponModAll": -10 }
       ],
