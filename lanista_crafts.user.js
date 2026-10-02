@@ -2,7 +2,7 @@
 // @name        Lanista scripts
 // @namespace   Violentmonkey Scripts
 // @icon        data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAC5UlEQVQ4T6WTS0gbYRSFz6+jySAaEQtqFiJEKaLQLEpwo5L6AmEkEnxU69KpRsTQwtStGylpjRvdWSxoJTF2obhQLAhiEIoU20TbWhVrlYQ2JkYZdZhxyvwS6QO66VnNhXO/ew78Q/CfIjdfv6i7u5snhPhGRkYi2tzb2/uAYZjloaGhg4QnIQro6up6mJmZOT04OEgXeJ7/pijKgSzLHePj49sOh2OJZVkjIaTT5XKtaEBZlpdHR0cPKKCnp+eQZdmvADpcLte20+l85Ha7n1/fAP6ceZ5fkmU5T1EUngL6+voeDw8PP0sYnE6n0+12u/8x3wApQBCEJ4IgBJKTiTUaPbkjSZI5Ho8nhcNhPcMwik6nk0tLS3clSfrM6nRvPdPT2TzPCxQQiUTqRFF8LUkSOzY2hlAohJKSEuTl5WJhYZFezM/PR1lZGXw+HwoKCtDU1ISsrKxVVVU7SfT4+PurqalsQgiMRiNmZ2eRmpqK5uZm+P1+XF1doaioEBsb73F0dISqqntgmBQoioyamtpPZH9/X1xcXGQ1c05ODurr6xEOhxCLneDi4gIamGVZGAwZyMgwUOje3h7MZjNsNluUbG5uigDYQOADtre/wGQyYWdnB7Is0/gJaaDCQhO2tj7SShaLRUt3DYjH42xaWho1SpIEvV6Ps7MzXF5e0gpapfT0dJyfn9M0mrQDDMNcAzweD1tXVwdVVelySkoKwuEwgsEgNRcXF9N6Gkw7oKWZm5uD3W6PkmAwKHq9XrayshLr6+sUUltbC6/XC1HU2oEmaGlpwcrKCk1WXl6O+fl5tLa2RkkgEHjp8/k6KioqKOD09BQcx2FycpIuJ9TY2EgBiqLAarXSBO3t7W+IqqpEEIT7HMc51tbWLNoDamho+Atgs9mwurpKu1dXVx/OzMy8aGtre/rb39jf339Lp9Pd5Tju9sTERG5SUpJBVVUGgGi323/4/f7dWCz2bmBgIEAIUbWdn0Q7ZfawRhyhAAAAAElFTkSuQmCC
-// @version     1.27.0
+// @version     1.27.2
 //
 // @match       https://lanista.se/game/*
 // @match       https://lanista.se/
@@ -3266,7 +3266,7 @@
 	}
 
 	// Real audio files (see @resource in the header) instead of synthesized tones - GM_getResourceURL
-	// resolves each to a local blob URL, no network fetch at play time. A fresh HTMLAudioElement's
+	// resolves each to a local data/blob URL. A fresh HTMLAudioElement's
 	// play() is blocked by the same autoplay-gesture policy a synthesized AudioContext would hit -
 	// arriving via client-side SPA navigation (clicking a match from history) carries over that
 	// click as the gesture, but a direct load of the battle URL has had none yet. On rejection the
@@ -3281,7 +3281,7 @@
 			if (!pendingAudioUnlockRetries.length) return;
 			pendingAudioUnlockRetries.splice(0).forEach((retry) => retry());
 		};
-		['pointerdown', 'keydown', 'touchstart'].forEach((eventName) => {
+		['click', 'keydown'].forEach((eventName) => {
 			document.addEventListener(eventName, retryPendingAudio, { passive: true });
 		});
 	}
@@ -3289,9 +3289,25 @@
 	// Returns the HTMLAudioElement so callers that care about playback (e.g. to time a visual
 	// effect off the real clip's length) can read its duration once metadata loads.
 	function playResourceSound(resourceName, volume = 1) {
-		const audio = new Audio(GM_getResourceURL(resourceName));
+		const resourceUrl = GM_getResourceURL(resourceName);
+		// Userscript managers can label cached MP3 resources with a generic MIME type.
+		// Chrome rejects those data URLs before decoding the otherwise valid MP3 bytes.
+		// Preserve the encoded payload and parameters, correcting only the media type.
+		const soundUrl = resourceUrl.replace(/^data:[^;,]*/i, 'data:audio/mpeg');
+		const audio = new Audio(soundUrl);
 		audio.volume = volume;
-		const attempt = () => audio.play().catch(() => pendingAudioUnlockRetries.push(attempt));
+		audio.addEventListener('error', () => {
+			console.warn('[Lanista sounds] Resource failed to load:', resourceName, {
+				code: audio.error && audio.error.code,
+				message: audio.error && audio.error.message
+			});
+		});
+		const attempt = () => audio.play().catch((error) => {
+			console.warn('[Lanista sounds] Playback failed:', resourceName, error.name, error.message);
+			// Only an autoplay rejection can be resolved by another user interaction.
+			// Retrying a missing, blocked, or unsupported resource hides the real failure.
+			if (error.name === 'NotAllowedError') pendingAudioUnlockRetries.push(attempt);
+		});
 		attempt();
 		return audio;
 	}
