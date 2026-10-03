@@ -2158,11 +2158,9 @@
                 console.error('Fel vid inläsning av rasdata:', error);
             });
 
-        // The race filter's options depend on lanista_races.json, which loads in parallel
-        // with (and isn't guaranteed to resolve before) the items fetch that first restores
-        // filter state from the URL - so a ?race= param may arrive before there's an option
-        // to select. Once race data lands, fill the dropdown and, if the URL asked for a
-        // race the initial restore couldn't set yet, apply it now.
+        // Race and item data load independently. Restore the entire URL only once
+        // items are ready; applying default controls here can erase saved filters
+        // when the smaller race response arrives first.
         function populateRaceFilterOptions() {
             const select = document.getElementById('raceFilter');
             const wanted = new URLSearchParams(window.location.search).get('race') || '';
@@ -2170,8 +2168,8 @@
                 raceData.races.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
             if (wanted && racesById[wanted]) {
                 select.value = wanted;
-                applyFilters();
             }
+            if (allItems.length > 0) loadStateFromURL();
         }
 
         function getItemType(item) {
