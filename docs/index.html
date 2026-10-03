@@ -1839,6 +1839,13 @@
                                 </label>
                             </div>
 
+                            <div class="filter-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="purchasableFilter">
+                                    Kan köpas
+                                </label>
+                            </div>
+
                             <div class="filter-group">
                                 <label for="sortFilter">Sortering</label>
                                 <select id="sortFilter">
@@ -2324,6 +2331,7 @@
             const minLevel = parseInt(document.getElementById('minLevelFilter').value) || 0;
             const maxLevel = parseInt(document.getElementById('maxLevelFilter').value) || 999;
             const craftableOnly = document.getElementById('craftableFilter').checked;
+            const purchasableOnly = document.getElementById('purchasableFilter').checked;
             const handedFilter = document.getElementById('handedFilter').value;
             const activeStatFilters = statFilters.filter(f => f.label);
 
@@ -2369,6 +2377,10 @@
 
                 // Craftable
                 if (craftableOnly && !isCraftable(item)) {
+                    return false;
+                }
+
+                if (purchasableOnly && !(item.merchants?.length > 0)) {
                     return false;
                 }
 
@@ -2464,6 +2476,7 @@
             const minLevel = document.getElementById('minLevelFilter').value;
             const maxLevel = document.getElementById('maxLevelFilter').value;
             const craftable = document.getElementById('craftableFilter').checked;
+            const purchasable = document.getElementById('purchasableFilter').checked;
             const handed = document.getElementById('handedFilter').value;
             const sort = document.getElementById('sortFilter').value;
 
@@ -2474,6 +2487,7 @@
             if (minLevel) params.set('min', minLevel);
             if (maxLevel) params.set('max', maxLevel);
             if (craftable) params.set('craftable', '1');
+            if (purchasable) params.set('purchasable', '1');
             if (handed) params.set('handed', handed);
             if (sort && sort !== 'name') params.set('sort', sort);
             statFilters.filter(f => f.label).forEach(f => params.append('stat', `${f.label}|${f.min}|${f.max}`));
@@ -2505,6 +2519,7 @@
             document.getElementById('minLevelFilter').value = params.get('min') || '';
             document.getElementById('maxLevelFilter').value = params.get('max') || '';
             document.getElementById('craftableFilter').checked = params.get('craftable') === '1';
+            document.getElementById('purchasableFilter').checked = params.get('purchasable') === '1';
             document.getElementById('handedFilter').value = params.get('handed') || '';
             document.getElementById('sortFilter').value = params.get('sort') || 'name';
 
@@ -3296,6 +3311,7 @@
             document.getElementById('minLevelFilter').value = '';
             document.getElementById('maxLevelFilter').value = '';
             document.getElementById('craftableFilter').checked = false;
+            document.getElementById('purchasableFilter').checked = false;
             document.getElementById('handedFilter').value = '';
             document.getElementById('sortFilter').value = 'name';
             statFilters = [];
@@ -4322,6 +4338,7 @@
         document.getElementById('minLevelFilter').addEventListener('change', applyFilters);
         document.getElementById('maxLevelFilter').addEventListener('change', applyFilters);
         document.getElementById('craftableFilter').addEventListener('change', applyFilters);
+        document.getElementById('purchasableFilter').addEventListener('change', applyFilters);
         document.getElementById('handedFilter').addEventListener('change', applyFilters);
         document.getElementById('sortFilter').addEventListener('change', applyFilters);
     </script>
