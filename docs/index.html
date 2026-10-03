@@ -1717,6 +1717,9 @@
             .items-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
             .brand-mark { display: none; }
         }
+        @media (max-width: 768px) {
+            .header-inner { padding-top: 14px; padding-bottom: 14px; gap: 14px; }
+        }
         @media (max-width: 700px) {
             .header-inner { min-height: 66px; }
             .brand-copy { display: block; }
@@ -2375,12 +2378,10 @@
                     return false;
                 }
 
-                // Craftable
-                if (craftableOnly && !isCraftable(item)) {
-                    return false;
-                }
-
-                if (purchasableOnly && !(item.merchants?.length > 0)) {
+                // Selected acquisition methods are alternatives; other filters still narrow the result.
+                if ((craftableOnly || purchasableOnly) &&
+                    !((craftableOnly && isCraftable(item)) ||
+                      (purchasableOnly && item.merchants?.length > 0))) {
                     return false;
                 }
 
