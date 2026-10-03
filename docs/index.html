@@ -1639,7 +1639,8 @@
         .comparison-bar > div:first-child { display: flex; align-items: center; gap: 12px; }
         .selected-items { gap: 7px; }
         .item-chip { border: 1px solid var(--line); border-radius: 2px; box-shadow: none; background: white; }
-        .comparison-actions button { border-radius: 2px; background: var(--oxblood); }
+        .comparison-actions button { border-radius: 2px; background: var(--oxblood); color: #fff; }
+        .comparison-actions button.secondary { background: transparent; color: var(--oxblood); border: 1px solid var(--oxblood); }
 
         .items-grid { grid-template-columns: repeat(4, minmax(0,1fr)); gap: 15px; margin: 0; }
         .item-card {
@@ -1740,8 +1741,25 @@
             .item-image::before { inset: 6px 6px auto; aspect-ratio: 1.1; }
             .item-info { padding: 11px 10px 10px; }
             .item-name { font-size: .94rem; }
-            .comparison-bar { top: 76px; align-items: stretch; }
-            .comparison-actions { flex-wrap: wrap; }
+            /* Selection bar docks to the bottom of the screen so it never fights the sticky header */
+            .comparison-bar {
+                position: fixed; top: auto; left: 0; right: 0; bottom: 0; margin: 0; z-index: 90;
+                flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 10px;
+                padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+                border-width: 1px 0 0; border-radius: 0; box-shadow: 0 -8px 24px rgba(37,28,14,.18);
+            }
+            body.has-selection { padding-bottom: 150px; }
+            .comparison-bar > div:first-child { min-width: 0; gap: 10px; }
+            .comparison-bar > div:first-child strong { flex: none; font-size: .8rem; line-height: 1.2; }
+            .selected-items {
+                flex-wrap: nowrap; min-width: 0; overflow-x: auto; -webkit-overflow-scrolling: touch;
+                scrollbar-width: none; padding-bottom: 2px;
+            }
+            .selected-items::-webkit-scrollbar { display: none; }
+            .item-chip { flex: none; padding: 6px 10px; font-size: .82rem; white-space: nowrap; }
+            .item-chip .remove { padding: 0 2px; font-size: 1.1rem; line-height: 1; }
+            .comparison-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+            .comparison-actions button { padding: 11px 6px; font-size: .78rem; white-space: nowrap; min-width: 0; }
             .detail-view { padding: 18px; }
             .detail-header { grid-template-columns: 1fr; }
             .detail-aside { position: static; }
@@ -2700,6 +2718,7 @@
             const bar = document.getElementById('comparisonBar');
             const display = document.getElementById('selectedItemsDisplay');
 
+            document.body.classList.toggle('has-selection', selectedItems.length > 0);
             if (selectedItems.length > 0) {
                 bar.style.display = 'flex';
                 display.innerHTML = selectedItems.map(key => {
