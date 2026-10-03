@@ -44,6 +44,19 @@ No build process required otherwise - it's pure static HTML/CSS/JavaScript.
 
 ## Usage
 
+### Merchant offers
+
+Save responses from `GET https://lanista.se/api/merchants/<id>` as `docs/m_<id>.json`, then run:
+
+```powershell
+node enrich_item_merchants.js
+node enrich_item_merchants.js lanista_items_detailed.json
+```
+
+The first command updates the browser catalog in `docs/`; the second updates the original catalog used by the exporters. Optional arguments are the input catalog, merchant-response directory, and output catalog (defaults to updating the input).
+Matching uses the exact item name, subtype and category flags: API item IDs overlap across categories, and the browser catalog has reassigned IDs. Each merchant entry retains its own `price` in silvermynt, `tokens` in polletter, `original_price`, API `item_id`, and `merchant_item_id`. Captured merchants are refreshed without duplicates; merchants without a saved response are preserved. Missing items are reported, and ambiguous matches stop the script before writing.
+The browser shows offers in cards, table rows, and item details. Purchase prices remain separate from the item's resale value. Run regression checks with `node --test enrich_item_merchants.test.js`.
+
 ### Searching
 Type in the search box to filter items by name - updates in real-time.
 
