@@ -9,12 +9,12 @@
 // @grant       GM_getResourceURL
 // @grant       GM_xmlhttpRequest
 // @connect     lanista.fra1.cdn.digitaloceanspaces.com
-// @resource    lanistaFxWhip       https://github.com/felixosth/lanista-scripts/raw/refs/heads/main/sounds/whip.mp3
-// @resource    lanistaFxChurchBell https://github.com/felixosth/lanista-scripts/raw/refs/heads/main/sounds/church_bell.mp3
-// @require     https://github.com/felixosth/lanista-scripts/raw/refs/heads/main/fight-animation.js
+// @resource    lanistaFxWhip       https://github.com/feffelicious/lanista-scripts/raw/refs/heads/main/sounds/whip.mp3
+// @resource    lanistaFxChurchBell https://github.com/feffelicious/lanista-scripts/raw/refs/heads/main/sounds/church_bell.mp3
+// @require     https://github.com/feffelicious/lanista-scripts/raw/refs/heads/main/fight-animation.js
 //
-// @downloadURL https://github.com/felixosth/lanista-scripts/raw/refs/heads/main/lanista_crafts.user.js
-// @updateURL   https://github.com/felixosth/lanista-scripts/raw/refs/heads/main/lanista_crafts.user.js
+// @downloadURL https://github.com/feffelicious/lanista-scripts/raw/refs/heads/main/lanista_crafts.user.js
+// @updateURL   https://github.com/feffelicious/lanista-scripts/raw/refs/heads/main/lanista_crafts.user.js
 //
 // @author      -
 // @description Adds material and effect columns to the craft table.
@@ -1806,7 +1806,7 @@
 	}
 
 	// Sends the logged-in player's own race/level/age/stats/weapon-skills/gear to the build
-	// simulator (felixosth.github.io/lanista-scripts) via a `?build=` URL param, so it opens
+	// simulator (feffelicious.github.io/lanista-scripts) via a `?build=` URL param, so it opens
 	// pre-filled instead of starting from scratch. The keys below are the build simulator's
 	// own vocabulary (docs/lanista_races.json's statLabels/weaponSkillLabels and
 	// docs/index.html's race id slugs) - both ends of this contract live in the
@@ -1816,7 +1816,7 @@
 	// lanista_races.json), and the 11 stat/7 weapon-skill enum names below are exactly what
 	// /api/avatars/me's stats/weapon_skills arrays report by elimination against
 	// lanista_races.json's 11 statLabels/7 weaponSkillLabels keys.
-	const BUILD_SIM_URL = 'https://felixosth.github.io/lanista-scripts/';
+	const BUILD_SIM_URL = 'https://feffelicious.github.io/lanista-scripts/';
 
 	const BUILD_SIM_RACE_MAP = {
 		HUMAN: 'manniska',
